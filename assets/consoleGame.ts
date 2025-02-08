@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Sprite, Color, Vec3, input, Input, EventTouch, tween, UITransform } from 'cc';
+import { _decorator, Component, Node, Sprite, Color, Vec3, input, Input, EventTouch, tween, UITransform, instantiate, Prefab, error } from 'cc';
 const { ccclass, property } = _decorator;
 
 // 定义颜色类型
@@ -9,7 +9,7 @@ class Grid {
     private rows: number;
     private cols: number;
     private grid: ColorType[][];
-    private sprites: Sprite[][];
+    public sprites: Sprite[][];
 
     constructor(rows: number, cols: number, initialColors: ColorType[][], sprites: Sprite[][]) {
         this.rows = rows;
@@ -48,9 +48,14 @@ class Grid {
         const queue: [number, number][] = [[x, y]];
         const visited = new Set<string>();
 
-        while (queue.length > 0) {
+        const processNext = () => {
+            if (queue.length === 0) return;
+
             const [currentX, currentY] = queue.shift()!;
-            if (visited.has(`${currentX},${currentY}`)) continue;
+            if (visited.has(`${currentX},${currentY}`)) {
+                processNext();
+                return;
+            }
             visited.add(`${currentX},${currentY}`);
 
             if (this.getColor(currentX, currentY) === originalColor) {
@@ -58,7 +63,12 @@ class Grid {
                 const neighbors = this.getNeighbors(currentX, currentY);
                 neighbors.forEach(([nx, ny]) => queue.push([nx, ny]));
             }
-        }
+
+            // 间隔 200 毫秒处理下一个方块
+            setTimeout(processNext, 100);
+        };
+
+        processNext();
     }
 
     // 检查是否所有区域颜色相同
@@ -117,7 +127,7 @@ class Grid {
         }
 
         // 随机化渐变时间
-        const duration = Math.random() * 0.5 + 0.2; 
+        const duration = Math.random() * 0.5 + 0.2;
 
         // 颜色插值过渡
         const startR = originalColor.r;
@@ -128,7 +138,7 @@ class Grid {
         const endB = targetColor.b;
 
         tween(sprite)
-           .to(duration, { 
+            .to(duration, {
                 color: {
                     r: endR,
                     g: endG,
@@ -143,7 +153,7 @@ class Grid {
                     target.color = new Color(currentR, currentG, currentB);
                 }
             })
-           .start();
+            .start();
 
         this.grid[x][y] = newColor;
     }
@@ -151,28 +161,39 @@ class Grid {
 
 @ccclass('ColorFloodGame')
 export class ColorFloodGame extends Component {
-    @property([Node])
-    blocks: Node[] = [];
+    @property(Prefab)
+    blockPrefab: Prefab | null = null;
 
     private grid: Grid;
     private maxSteps: number = 3;
     private currentSteps: number = 0;
     private targetColor: ColorType = 2;
-    private rows: number = 3;
-    private cols: number = 3;
+    private rows: number;
+    private cols: number;
 
     start() {
         const initialColors: ColorType[][] = [
-            [1, 1, 1],
-            [2, 2, 2],
-            [2, 1, 1]
+            [1, 2, 1, 1, 2, 1],
+            [1, 2, 1, 1, 2, 1],
+            [1, 2, 1, 1, 2, 1],
+            [1, 2, 1, 1, 2, 1],
+            [1, 2, 1, 1, 2, 1],
         ];
+        this.rows = initialColors.length;
+        this.cols = initialColors[0].length;
+
         const sprites: Sprite[][] = [];
         for (let i = 0; i < this.rows; i++) {
             sprites[i] = [];
             for (let j = 0; j < this.cols; j++) {
-                const index = i * this.cols + j;
-                sprites[i][j] = this.blocks[index].getComponent(Sprite)!;
+                if (this.blockPrefab) {
+                    const block = instantiate(this.blockPrefab);
+                    block.setParent(this.node);
+                    const size = 100; // 方块大小
+                    block.setPosition(j * size, -i * size);
+                    const sprite = block.getComponent(Sprite)!;
+                    sprites[i][j] = sprite;
+                }
             }
         }
         this.grid = new Grid(this.rows, this.cols, initialColors, sprites);
@@ -184,11 +205,10 @@ export class ColorFloodGame extends Component {
         const touchPos = event.getLocation();
         for (let i = 0; i < this.rows; i++) {
             for (let j = 0; j < this.cols; j++) {
-                const index = i * this.cols + j;
-                const block = this.blocks[index];
-                const sprite = block.getComponent(Sprite)!;
+                const sprite = this.grid.sprites[i][j];
+                const block = sprite.node;
                 const worldPos = block.getWorldPosition();
-                const size = sprite.node.getComponent(UITransform).contentSize;
+                const size = sprite.node.getContentSize();
                 const halfWidth = size.width / 2;
                 const halfHeight = size.height / 2;
                 if (
